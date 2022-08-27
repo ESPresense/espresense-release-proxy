@@ -12,15 +12,8 @@ const corsHeaders = {
 const PROXY_ENDPOINT = "/releases/"
 const DOWNLOAD_ENDPOINT = "/releases/latest-any/download/"
 
-function manifestResponse(request) {
-    const path = new URL(request.url).pathname;
-    const fname = path.substring(path.lastIndexOf('/') + 1);
-    const name = fname.substring(0, fname.lastIndexOf('.'));
-    return new Response(`{
-    "name": "ESPresense (${name})",
-    "new_install_prompt_erase": true,
-
-    "builds": [{
+function esp32(path) {
+    return {
         "chipFamily": "ESP32",
         "improv": false,
         "parts": [{
@@ -36,17 +29,79 @@ function manifestResponse(request) {
             "offset": 57344
         },
         {
-            "path": "${name}.bin",
+            "path": path,
             "offset": 65536
-        }
-        ]
-    }]
-}`, {
-        headers: {
-            "content-type": "text/json;charset=UTF-8",
-            "Access-Control-Allow-Origin": "*"
+        }]
+    };
+}
+
+function esp32c3(path) {
+    return {
+        "chipFamily": "ESP32-C3",
+        "improv": false,
+        "parts": [{
+            "path": "/static/bootloader_esp32c3.bin",
+            "offset": 0x0000
         },
+        {
+            "path": "/static/partitions_esp32c3.bin",
+            "offset": 0x8000
+        },
+        {
+            "path": "/static/boot_app0.bin",
+            "offset": 0xe000
+        },
+        {
+            "path": path,
+            "offset": 0x10000
+        }]
+    };
+}
+
+function findAsset(rel, name)
+{
+    var f = rel.assets.filter(f => f.name == name)
+    return f.length ? f[0] : null
+}
+
+async function manifestResponse(request) {
+    const url = new URL(request.url)
+    const { pathname, searchParams } = url
+    const fname = pathname.substring(pathname.lastIndexOf('/') + 1);
+    const tag = fname.substring(0, fname.lastIndexOf('.'));
+
+    request = new Request(`https://api.github.com/repos/ESPresense/ESPresense/releases/tags/${tag}`)
+    request.headers.set("User-Agent", "espresense-release-proxy")
+    request.followAllRedirects = true
+    console.log(`Request: ${request.url}`)
+    let response = await fetch(request, {
+        cf: {
+            cacheTtlByStatus: { '200-299': 300, '404': 1, '500-599': 0 }
+        }
     })
+    const rel = JSON.parse(await response.text());
+    const flavor = searchParams.get('flavor');
+    var manifest = {
+        "name": "ESPresense " + rel.name + (flavor && flavor != "" ? ` (${flavor})` : ""),
+        "new_install_prompt_erase": true,
+        "builds": []
+    };
+    var a32 = findAsset(rel, `esp32-${flavor}.bin`) || findAsset(rel, `${flavor}.bin`) || findAsset(rel, `esp32.bin`)
+    console.log(JSON.stringify(a32))
+    if (a32) manifest.builds.push(esp32(`download/${tag}/${a32.name}`))
+
+    var c3 = findAsset(rel, `esp32c3-${flavor}.bin`) || findAsset(rel, `esp32c3.bin`)
+    if (c3) manifest.builds.push(esp32c3(`download/${tag}/${c3.name}`))
+
+    console.log(JSON.stringify(manifest))
+
+    return new Response(JSON.stringify(manifest), {
+        headers: {
+            "Content-Type": "text/json;charset=UTF-8",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=1500"
+        }
+    });
 }
 
 async function fetchFromGithub(request) {
@@ -58,13 +113,18 @@ async function fetchFromGithub(request) {
     console.log(`Request: ${request.url}`)
 
     request.headers.set("Origin", new URL(request.url).pathname)
-    let response = await fetch(request)
+    let response = await fetch(request, {
+        cf: {
+            cacheTtlByStatus: { '200-299': 300, '404': 1, '500-599': 0 }
+        }
+    });
 
     // Recreate the response so we can modify the headers
     response = new Response(response.body, response)
 
     // Set CORS headers
     response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Cache-Control", "public, max-age=1500")
 
     return response
 }
@@ -103,20 +163,29 @@ function handleOptions(request) {
 }
 
 async function redirectToPrerelease(request) {
-    const path = new URL(request.url).pathname;
-    const fname = path.substring(path.lastIndexOf('/') + 1);
+    const url = new URL(request.url)
+    const { pathname, searchParams } = url
+    const fname = pathname.substring(pathname.lastIndexOf('/') + 1);
+    console.log(fname);
 
     request = new Request("https://api.github.com/repos/ESPresense/ESPresense/releases")
     request.headers.set("User-Agent", "espresense-release-proxy")
     request.followAllRedirects = true
-    console.log(`Request: ${request.url}`)
-    let response = await fetch(request)
-    const rels = JSON.parse(await response.text());
+
+    let releases = await fetch(request, {
+        cf: {
+            cacheTtlByStatus: { '200-299': 300, '404': 1, '500-599': 0 }
+        }
+    })
+    const rels = JSON.parse(await releases.text());
     const rel = rels.find(a => a.assets.length);
-    if (!rel) new Response(null, { status: 404, statusText: "No release found!" });
+    if (!rel) return new Response(null, { status: 404, statusText: "No release found!" });
     const asset = rel.assets.find(a => a.name == fname);
-    if (!asset) new Response(null, { status: 404, statusText: "No asset found!" });
-    return Response.redirect(asset.browser_download_url)
+    if (!asset) return new Response(null, { status: 404, statusText: "No asset found!" });
+    let response = new Response(null, { status: 302 });
+    response.headers.set("Location", asset.browser_download_url);
+    response.headers.set("Cache-Control", "public, max-age=1500")
+    return response
 }
 
 addEventListener("fetch", event => {
