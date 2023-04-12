@@ -15,13 +15,12 @@ const DOWNLOAD_ENDPOINT = "/releases/latest-any/download/"
 function esp32(path) {
     return {
         "chipFamily": "ESP32",
-        "improv": false,
         "parts": [{
-            "path": "/static/bootloader_esp32.bin",
+            "path": "/static/esp32/bootloader.bin",
             "offset": 4096
         },
         {
-            "path": "/static/partitions.bin",
+            "path": "/static/esp32/partitions.bin",
             "offset": 32768
         },
         {
@@ -38,13 +37,34 @@ function esp32(path) {
 function esp32c3(path) {
     return {
         "chipFamily": "ESP32-C3",
-        "improv": false,
         "parts": [{
-            "path": "/static/bootloader_esp32c3.bin",
+            "path": "/static/esp32c3/bootloader.bin",
             "offset": 0x0000
         },
         {
-            "path": "/static/partitions_esp32c3.bin",
+            "path": "/static/esp32c3/partitions.bin",
+            "offset": 0x8000
+        },
+        {
+            "path": "/static/boot_app0.bin",
+            "offset": 0xe000
+        },
+        {
+            "path": path,
+            "offset": 0x10000
+        }]
+    };
+}
+
+function esp32s3(path) {
+    return {
+        "chipFamily": "ESP32-S3",
+        "parts": [{
+            "path": "/static/esp32s3/bootloader.bin",
+            "offset": 0x0000
+        },
+        {
+            "path": "/static/esp32s3/partitions.bin",
             "offset": 0x8000
         },
         {
@@ -82,7 +102,8 @@ async function manifestResponse(request) {
     const rel = JSON.parse(await response.text());
     const flavor = searchParams.get('flavor');
     var manifest = {
-        "name": "ESPresense " + rel.name + (flavor && flavor != "" ? ` (${flavor})` : ""),
+        "name": "ESPresense" + (flavor && flavor != "" ? ` (${flavor})` : ""),
+        "version": rel.name,
         "new_install_prompt_erase": true,
         "builds": []
     };
@@ -92,6 +113,9 @@ async function manifestResponse(request) {
 
     var c3 = findAsset(rel, `esp32c3-${flavor}.bin`) || findAsset(rel, `esp32c3.bin`)
     if (c3) manifest.builds.push(esp32c3(`download/${tag}/${c3.name}`))
+
+    var s3 = findAsset(rel, `esp32s3-${flavor}.bin`) || findAsset(rel, `esp32s3.bin`)
+    if (c3) manifest.builds.push(esp32s3(`download/${tag}/${c3.name}`))
 
     console.log(JSON.stringify(manifest))
 

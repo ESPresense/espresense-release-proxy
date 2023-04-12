@@ -1,8 +1,4 @@
 name = "espresense-release-proxy"
-type = "javascript"
-
 account_id = "c72fc273edfb2236527b400b5463d663"
 workers_dev = true
-route = ""
-zone_id = ""
 compatibility_date = "2022-02-23"
