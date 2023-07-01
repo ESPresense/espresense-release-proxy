@@ -115,7 +115,7 @@ async function manifestResponse(request) {
     if (c3) manifest.builds.push(esp32c3(`download/${tag}/${c3.name}`))
 
     var s3 = findAsset(rel, `esp32s3-${flavor}.bin`) || findAsset(rel, `esp32s3.bin`)
-    if (c3) manifest.builds.push(esp32s3(`download/${tag}/${c3.name}`))
+    if (s3) manifest.builds.push(esp32s3(`download/${tag}/${s3.name}`))
 
     console.log(JSON.stringify(manifest))
 
